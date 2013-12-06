@@ -158,7 +158,7 @@ cbor_buf_append_3byte(struct cbor_buf *buf, uint8_t m, uint16_t n)
 	data[len    ] = m;
 	data[len + 1] = (uint8_t)(n >> 8);
 	data[len + 2] = (uint8_t)(n     );
-	buf->len  = len + sizeof(m) + sizeof(n);
+	buf->len      = len + sizeof(m) + sizeof(n);
 
 	return true;
 }
