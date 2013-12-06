@@ -16,3 +16,8 @@
 *.exe
 *.out
 *.app
+main
+
+# tmp files
+.*.swp
+.depend
