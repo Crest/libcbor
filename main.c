@@ -16,16 +16,16 @@ main(int argc, char **argv)
 {
 	(void)argc;
 	(void)argv;
-	int128_t i = -((int128_t)(1) << 64);
-	int128_t j = 0;
+	double x = 23.42;
+	double y;
 
 	uint8_t data[100];
 	struct cbor_buf buf;
-	cbor_buf_init(&buf, data, sizeof(data));
-	cbor_add_int128(&buf, i);
+	cbor_buf_init_empty(&buf, data, sizeof(data));
+	cbor_add_double(&buf, x);
 	dump(&buf);
-	cbor_read_integer(&buf, &j);
-	printf(i == j ? "equal\n" : "unequal\n");
+	cbor_read_double(&buf, &y);
+	printf("%f\n", y);
 
 	return 0;
 }

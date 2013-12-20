@@ -26,6 +26,7 @@
 #ifndef LIBCBOR_CBOR_H
 #define LIBCBOR_CBOR_H
 
+#include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -34,7 +35,7 @@
 #include <limits.h>
 
 typedef __int128_t  int128_t;
-typedef __uint128_t uint128_;
+typedef __uint128_t uint128_t;
 
 struct cbor_buf {
 	uint8_t *data;
@@ -43,8 +44,23 @@ struct cbor_buf {
 	size_t   idx;
 };
 
+static inline bool
+cbor_buf_init(struct cbor_buf *buf, void *data, size_t len, size_t size)
+{
+	if ( len > size ) {
+		return false;
+	}
+
+	buf->data = data;
+	buf->len  = len;
+	buf->cap  = size;
+	buf->idx  = 0;
+
+	return true;
+}
+
 static inline void
-cbor_buf_init(struct cbor_buf *buf, void *data, size_t size)
+cbor_buf_init_empty(struct cbor_buf *buf, void *data, size_t size)
 {
 	buf->data = data;
 	buf->len  = 0;
@@ -631,6 +647,38 @@ cbor_peek_u32(uint8_t *data)
 	return (uint64_t)value;
 }
 
+static inline float
+cbor_peek_float(uint8_t *data)
+{
+	union {
+		uint32_t n;
+		float    x;
+	} tmp = { .n = ((uint32_t)data[0]) << 24 |
+		       ((uint32_t)data[1]) << 16 |
+	               ((uint32_t)data[2]) <<  8 |
+		       ((uint32_t)data[3]) };
+
+	return tmp.x;
+}
+
+static inline double
+cbor_peek_double(uint8_t *data)
+{
+	union {
+		uint64_t n;
+		double   x;
+	} tmp = { .n = ((uint64_t)data[0]) << 56 |
+		       ((uint64_t)data[1]) << 48 |
+	               ((uint64_t)data[2]) << 40 |
+		       ((uint64_t)data[3]) << 32 |
+		       ((uint64_t)data[4]) << 24 |
+		       ((uint64_t)data[5]) << 16 |
+		       ((uint64_t)data[6]) <<  8 |
+		       ((uint64_t)data[7]) };
+
+	return tmp.x;
+}
+
 static inline uint64_t
 cbor_peek_u64(uint8_t *data)
 {
@@ -808,6 +856,147 @@ cbor_read_integer(struct cbor_buf *buf, int128_t *value)
 	}
 
 	return false;
+}
+
+static inline bool
+cbor_expect_byte(struct cbor_buf *buf, uint8_t byte)
+{
+	size_t   len  = buf->len;
+	size_t   idx  = buf->idx;
+	uint8_t *data = buf->data + idx;
+
+        if ( idx >= len ) {
+		return false;
+	}
+	
+	if ( *data == byte ) {
+		buf->idx = idx + 1;
+		return true;
+	}
+
+	return false;
+}
+
+static inline bool
+cbor_expect_false(struct cbor_buf *buf)
+{
+	return cbor_expect_byte(buf, 0xf4);
+}
+
+static inline bool
+cbor_expect_true(struct cbor_buf *buf)
+{
+	return cbor_expect_byte(buf, 0xf5);
+}
+
+static inline bool
+cbor_expect_null(struct cbor_buf *buf)
+{
+	return cbor_expect_byte(buf, 0xf6);
+}
+
+static inline bool
+cbor_read_boolean(struct cbor_buf *buf, bool *value)
+{
+	size_t   len  = buf->len;
+	size_t   idx  = buf->idx;
+	uint8_t *data = buf->data + idx;
+
+	if ( idx >= len ) {
+		return false;
+	}
+	
+	uint8_t byte = *data;
+
+	if ( byte == 0xf4 || byte == 0xf5 ) {
+        	buf->idx = idx + 1;
+		*value = byte == 0xf5;
+		return true;
+	}
+	
+	return false;
+}
+
+static inline bool
+cbor_read_float(struct cbor_buf *buf, float *x)
+{
+	size_t   len  = buf->len;
+	size_t   idx  = buf->idx;
+	uint8_t *data = buf->data + idx;
+
+	if ( len < sizeof(uint8_t) + sizeof(float) || idx > len - sizeof(uint8_t) - sizeof(float) ) {
+        	return false;
+	}
+	
+	if ( *data++ != 0xfa ) {
+		return false;
+	}
+
+	buf->idx = idx + sizeof(uint8_t) + sizeof(float);
+	*x       = cbor_peek_float(data);
+
+	return true;
+}
+
+static inline bool
+cbor_read_double(struct cbor_buf *buf, double *x)
+{
+	size_t   len  = buf->len;
+	size_t   idx  = buf->idx;
+	uint8_t *data = buf->data + idx;
+
+	if ( len < sizeof(uint8_t) + sizeof(double) || idx > len - sizeof(uint8_t) - sizeof(double) ) {
+		return false;
+	}
+	
+	if ( *data++ != 0xfb ) {
+		return false;
+	}
+
+	buf->idx = idx + sizeof(uint8_t) + sizeof(double);
+	*x       = cbor_peek_double(data);
+
+	return true;
+}
+
+static inline double
+cbor_decode_half(uint8_t *data)
+{
+	int    half      = (data[0] << 8) + data[1];
+	int    exponent  = (half >> 10) & 0x1f;
+	int    mantissa  = half & 0x3ff;
+	double sign      = half & 0x8000 ? -1.0 : 1.0;
+	double absolute;
+	
+	if ( exp == 0 ) {
+		absolute = ldexp(mantissa, -24);
+	} else if ( exponent != 31 ) {
+		absolute = ldexp(mantissa + 1024, exponent - 25);
+	} else {
+		absolute = mantissa == 0 ? INFINITY : NAN;
+	}
+	return sign * absolute;
+}
+
+static inline bool
+cbor_read_half(struct cbor_buf *buf, double *x)
+{
+	size_t   len  = buf->len;
+	size_t   idx  = buf->idx;
+	uint8_t *data = buf->data + idx;
+
+	if ( len < sizeof(uint8_t) * 3 || idx > len - sizeof(uint8_t) * 3 ) {
+		return false;
+	}
+
+	if ( *data++ != 0xf9 ) {
+        	return false;
+	}
+
+	buf->idx = idx + sizeof(uint8_t) * 3;
+	*x       = cbor_decode_half(data);
+
+	return true;
 }
 
 
